@@ -129,22 +129,22 @@ static uint8_t ad7746_read(AD7746State *s)
         s->buf[s->len++] = s->status;
         /* Fallthrough */
     case AD7746_CAP_DATA_H_REG:
-        s->buf[s->len++] = (s->cap_data >> 0) & 0xFF;
+        s->buf[s->len++] = (s->cap_data >> 16) & 0xFF;
         /* Fallthrough */
     case AD7745_CAP_DATA_M_REG:
         s->buf[s->len++] = (s->cap_data >> 8) & 0xFF;
         /* Fallthrough */
     case AD7746_CAP_DATA_L_REG:
-        s->buf[s->len++] = (s->cap_data >> 16) & 0xFF;
+        s->buf[s->len++] = (s->cap_data >> 0) & 0xFF;
         /* Fallthrough */
     case AD7746_VT_DATA_H_REG:
-        s->buf[s->len++] = (s->vt_data >> 0) & 0xFF;
+        s->buf[s->len++] = (s->vt_data >> 16) & 0xFF;
         /* Fallthrough */
     case AD7746_VT_DATA_M_REG:
         s->buf[s->len++] = (s->vt_data >> 8) & 0xFF;
         /* Fallthrough */
     case AD7746_VT_DATA_L_REG:
-        s->buf[s->len++] = (s->vt_data >> 16) & 0xFF;
+        s->buf[s->len++] = (s->vt_data >> 0) & 0xFF;
         /* Fallthrough */
     case AD7746_CAP_SETUP_REG:
         s->buf[s->len++] = s->cap_setup;
@@ -165,29 +165,25 @@ static uint8_t ad7746_read(AD7746State *s)
         s->buf[s->len++] = s->cap_dac[1];
         /* Fallthrough */
     case AD7746_CAP_OFFSET_H_REG:
-        s->buf[s->len++] = (s->cap_offset >> 0) & 0xFF;
-        /* Fallthrough */
-    case AD7746_CAP_OFFSET_L_REG:
         s->buf[s->len++] = (s->cap_offset >> 8) & 0xFF;
         /* Fallthrough */
-    case AD7746_CAP_GAIN_H_REG:
-        s->buf[s->len++] = (s->cap_gain >> 0) & 0xFF;
+    case AD7746_CAP_OFFSET_L_REG:
+        s->buf[s->len++] = (s->cap_offset >> 0) & 0xFF;
         /* Fallthrough */
-    case AD7746_CAP_GAIN_L_REG:
+    case AD7746_CAP_GAIN_H_REG:
         s->buf[s->len++] = (s->cap_gain >> 8) & 0xFF;
         /* Fallthrough */
+    case AD7746_CAP_GAIN_L_REG:
+        s->buf[s->len++] = (s->cap_gain >> 0) & 0xFF;
+        /* Fallthrough */
     case AD7746_VOLT_GAIN_H_REG:
-        s->buf[s->len++] = (s->volt_gain >> 0) & 0xFF;
+        s->buf[s->len++] = (s->volt_gain >> 8) & 0xFF;
         /* Fallthrough */
     case AD7746_VOLT_GAIN_L_REG:
-        s->buf[s->len++] = (s->volt_gain >> 8) & 0xFF;
+        s->buf[s->len++] = (s->volt_gain >> 0) & 0xFF;
     default:
         break;
     }
-}
-
-static void ad7150_write(AD7150State *s)
-{
 }
 
 static uint8_t ad7746_rx(I2CSlave *i2c)
@@ -198,6 +194,50 @@ static uint8_t ad7746_rx(I2CSlave *i2c)
         return s->buf[s->len++];
     } else {
         return 0xff;
+    }
+}
+
+static void ad7150_write(AD7150State *s)
+{
+    switch (s->pointer + s->len - 1) {
+    case AD7746_CAP_SETUP_REG:
+        s->cap_setup = s->buf[s->len - 1];
+        break;
+    case AD7746_VT_SETUP_REG:
+        s->vt_setup = s->buf[s->len - 1];
+        break;
+    case AD7746_EXC_SETUP_REG:
+        s->exc_setup = s->buf[s->len - 1];
+        break;
+    case AD7746_CONFIG_REG:
+        s->config = s->buf[s->len - 1];
+        break;
+    case AD7746_CAP_DAC_A_REG:
+        s->cap_dac[0] = s->buf[s->len - 1];
+        break;
+    case AD7746_CAP_DAC_B_REG:
+        s->cap_dac[1] = s->buf[s->len - 1];
+        break;
+    case AD7746_CAP_OFFSET_H_REG:
+        s->cap_offset = (s->cap_offset & 0x00FF) | (s->buf[s->len - 1] << 8);
+        break;
+    case AD7746_CAP_OFFSET_L_REG:
+        s->cap_offset = (s->cap_offset & 0xFF00) | s->buf[s->len - 1];
+        break;
+    case AD7746_CAP_GAIN_H_REG:
+        s->cap_gain = (s->cap_gain & 0x00FF) | (s->buf[s->len - 1] << 8);
+        break;
+    case AD7746_CAP_GAIN_L_REG:
+        s->cap_gain = (s->cap_gain & 0xFF00) | s->buf[s->len - 1];
+        break;
+    case AD7746_VOLT_GAIN_H_REG:
+        s->volt_gain = (s->volt_gain & 0x00FF) | (s->buf[s->len - 1] << 8);
+        break;
+    case AD7746_VOLT_GAIN_L_REG:
+        s->volt_gain = (s->volt_gain & 0xFF00) | s->buf[s->len - 1];
+        break;
+    default:
+        break;
     }
 }
 
@@ -257,6 +297,13 @@ static void tmp105_realize(DeviceState *dev, Error **errp)
     // TODO: IO pins
 
     ad7746_reset(&s->i2c);
+}
+
+static void ad7746_initnf(Object *obj)
+{
+    object_property_add(obj, "ch1_capacitance", "int",
+                        ad7150_get_capacitance,
+                        ad7150_set_capacitance, NULL, 0);
 }
 
 static void ad7746_class_init(ObjectClass *klass, void *data)
