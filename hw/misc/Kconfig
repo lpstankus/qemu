@@ -9,6 +9,10 @@ config AD7150
     bool
     depends on I2C
 
+config AD7746
+    bool
+    depends on I2C
+
 config TMP105
     bool
     depends on I2C

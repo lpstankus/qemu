@@ -30,6 +30,7 @@
 #include "qom/object.h"
 
 #define TYPE_AD7746 "ad7746"
+OBJECT_DECLARE_SIMPLE_TYPE(AD7746State, AD7746)
 
 /* Registers: */
 /* r only */
@@ -53,17 +54,6 @@
 #define AD7746_CAP_GAIN_L_REG   0x10
 #define AD7746_VOLT_GAIN_H_REG  0x11
 #define AD7746_VOLT_GAIN_L_REG  0x12
-
-typedef struct DeviceInfo {
-    int model;
-    const char *name;
-} DeviceInfo;
-
-static const DeviceInfo devices[] = {
-    { TMP421_DEVICE_ID, "ad7746" },
-    { TMP422_DEVICE_ID, "tmp422" },
-    { TMP423_DEVICE_ID, "tmp423" },
-};
 
 struct AD7746State {
     /*< private >*/
@@ -92,17 +82,12 @@ struct AD7746State {
     uint16_t volt_gain;
 };
 
-struct AD7746Class {
-    I2CSlaveClass parent_class;
-    DeviceInfo *dev;
-};
-
 static int ad7746_post_load(void *opaque, int version_id)
 {
     return 0;
 }
 
-static const VMStateDescription vmstate_ad7150 = {
+static const VMStateDescription vmstate_ad7746 = {
     .name = "AD7746",
     .version_id = 0,
     .minimum_version_id = 0,
@@ -116,7 +101,7 @@ static const VMStateDescription vmstate_ad7150 = {
     },
 };
 
-static uint8_t ad7746_read(AD7746State *s)
+static void ad7746_read(AD7746State *s)
 {
     s->len = 0;
 
@@ -131,7 +116,7 @@ static uint8_t ad7746_read(AD7746State *s)
     case AD7746_CAP_DATA_H_REG:
         s->buf[s->len++] = (s->cap_data >> 16) & 0xFF;
         /* Fallthrough */
-    case AD7745_CAP_DATA_M_REG:
+    case AD7746_CAP_DATA_M_REG:
         s->buf[s->len++] = (s->cap_data >> 8) & 0xFF;
         /* Fallthrough */
     case AD7746_CAP_DATA_L_REG:
@@ -197,7 +182,7 @@ static uint8_t ad7746_rx(I2CSlave *i2c)
     }
 }
 
-static void ad7150_write(AD7150State *s)
+static void ad7746_write(AD7746State *s)
 {
     switch (s->pointer + s->len - 1) {
     case AD7746_CAP_SETUP_REG:
@@ -289,7 +274,7 @@ static void ad7746_reset(I2CSlave *i2c)
     s->pointer = 0;
 }
 
-static void tmp105_realize(DeviceState *dev, Error **errp)
+static void ad7746_realize(DeviceState *dev, Error **errp)
 {
     I2CSlave *i2c = I2C_SLAVE(dev);
     AD7746State *s = AD7746(i2c);
@@ -299,11 +284,11 @@ static void tmp105_realize(DeviceState *dev, Error **errp)
     ad7746_reset(&s->i2c);
 }
 
-static void ad7746_initnf(Object *obj)
+static void ad7746_initfn(Object *obj)
 {
-    object_property_add(obj, "ch1_capacitance", "int",
-                        ad7150_get_capacitance,
-                        ad7150_set_capacitance, NULL, 0);
+    //object_property_add(obj, "ch1_capacitance", "int",
+    //                    ad7746_get_capacitance,
+    //                    ad7746_set_capacitance, NULL, 0);
 }
 
 static void ad7746_class_init(ObjectClass *klass, void *data)
