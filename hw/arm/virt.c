@@ -2087,6 +2087,64 @@ static void machvirt_init(MachineState *machine)
         create_gpio_devices(vms, VIRT_SECURE_GPIO, secure_sysmem);
     }
 
+    // SPI node and subnode creation
+    {
+        const char compat[] = "arm,pl022\0arm,primecell";
+        char *nodename = g_strdup_printf("/spi@%" PRIx64, vms->memmap[VIRT_SPI].base);
+
+        DeviceState *dev = sysbus_create_simple("pl022", vms->memmap[VIRT_SPI].base,
+                                                qdev_get_gpio_in(vms->gic, vms->irqmap[VIRT_SPI]));
+
+        qemu_fdt_add_subnode(ms->fdt, "/mclk");
+        qemu_fdt_setprop_string(ms->fdt, "/mclk", "compatible", "fixed-clock");
+        qemu_fdt_setprop_cell(ms->fdt, "/mclk", "#clock-cells", 0x0);
+        qemu_fdt_setprop_cell(ms->fdt, "/mclk", "clock-frequency", 24000);
+        qemu_fdt_setprop_string(ms->fdt, "/mclk", "clock-output-names", "bobsclk");
+
+        const char *reg_node = "/regulator@0";
+        uint32_t clk_phandle = qemu_fdt_alloc_phandle(ms->fdt);
+        uint32_t reg_phandle = qemu_fdt_alloc_phandle(ms->fdt);
+        qemu_fdt_setprop_cell(ms->fdt, "/mclk", "phandle", clk_phandle);
+        qemu_fdt_add_subnode(ms->fdt, reg_node);
+        qemu_fdt_setprop(ms->fdt, reg_node, "compatible", "regulator-fixed", sizeof("regulator-fixed"));
+        qemu_fdt_setprop_cell(ms->fdt, reg_node, "reg", 0);
+        qemu_fdt_setprop_cell(ms->fdt, reg_node, "regulator-min-microvolt", 3000000);
+        qemu_fdt_setprop_cell(ms->fdt, reg_node, "regulator-max-microvolt", 3000000);
+        qemu_fdt_setprop_cell(ms->fdt, reg_node, "phandle", reg_phandle);
+        qemu_fdt_setprop_string(ms->fdt, reg_node, "regulator-name", "vcc_fun");
+        qemu_fdt_add_subnode(ms->fdt, nodename);
+
+        qemu_fdt_setprop(ms->fdt, nodename, "compatible",  compat, sizeof(compat));
+        qemu_fdt_setprop_sized_cells(ms->fdt, nodename, "reg",
+                                     2, vms->memmap[VIRT_SPI].base,
+                                     2, vms->memmap[VIRT_SPI].size);
+        qemu_fdt_setprop_string(ms->fdt, nodename, "clock-names", "apb_pclk");
+        qemu_fdt_setprop_cell(ms->fdt, nodename, "clocks", vms->clock_phandle);
+        qemu_fdt_setprop_cells(ms->fdt, nodename, "interrupts",
+                               GIC_FDT_IRQ_TYPE_SPI, vms->irqmap[VIRT_SPI],
+                               GIC_FDT_IRQ_FLAGS_LEVEL_HI);
+        qemu_fdt_setprop_cells(ms->fdt, nodename, "num-cs", 3);
+
+        // adxl313
+        const char compat2[] = "adi,adxl313";
+        char *nodename2 = g_strdup_printf("/spi@%" PRIx64 "/adc@%" PRIx64, vms->memmap[VIRT_SPI].base, 0x0l);
+
+        void *bus = qdev_get_child_bus(dev, "ssi");
+        DeviceState *spidev = ssi_create_peripheral(bus, "adxl313");
+        if (!spidev)
+            printf("could not create adxl313\n");
+
+        qemu_fdt_add_subnode(ms->fdt, nodename2);
+        qemu_fdt_setprop(ms->fdt, nodename2, "compatible",  compat2, sizeof(compat2));
+
+        qemu_fdt_setprop_sized_cells(ms->fdt, nodename2, "reg", 1, 0x0);
+        qemu_fdt_setprop_sized_cells(ms->fdt, nodename2, "spi-max-frequency", 1, 1000000);
+
+        qemu_fdt_setprop_cell(ms->fdt, nodename2, "interrupt-parent", pl061_phandle);
+        qemu_fdt_setprop_cell(ms->fdt, nodename2, "interrupt-parent", pl061_phandle);
+        qemu_fdt_setprop_cells(ms->fdt, nodename2, "interrupts", 4, 3);
+    }
+
      /* connect powerdown request */
      vms->powerdown_notifier.notify = virt_powerdown_req;
      qemu_register_powerdown_notifier(&vms->powerdown_notifier);
