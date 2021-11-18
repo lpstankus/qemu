@@ -79,6 +79,8 @@
 #include "hw/virtio/virtio-iommu.h"
 #include "hw/char/pl011.h"
 #include "qemu/guest-random.h"
+#include "hw/ssi/pl022.h"
+#include "hw/ssi/ssi.h"
 
 #define DEFINE_VIRT_MACHINE_LATEST(major, minor, latest) \
     static void virt_##major##_##minor##_class_init(ObjectClass *oc, \
@@ -155,6 +157,7 @@ static const MemMapEntry base_memmap[] = {
     [VIRT_PVTIME] =             { 0x090a0000, 0x00010000 },
     [VIRT_SECURE_GPIO] =        { 0x090b0000, 0x00001000 },
     [VIRT_MMIO] =               { 0x0a000000, 0x00000200 },
+    [VIRT_SPI] = 		{ 0x0b100000, 0x00001000 },
     /* ...repeating for a total of NUM_VIRTIO_TRANSPORTS, each of that size */
     [VIRT_PLATFORM_BUS] =       { 0x0c000000, 0x02000000 },
     [VIRT_SECURE_MEM] =         { 0x0e000000, 0x01000000 },
@@ -190,6 +193,7 @@ static const int a15irqmap[] = {
     [VIRT_GPIO] = 7,
     [VIRT_SECURE_UART] = 8,
     [VIRT_ACPI_GED] = 9,
+    [VIRT_SPI] = 11,
     [VIRT_MMIO] = 16, /* ...to 16 + NUM_VIRTIO_TRANSPORTS - 1 */
     [VIRT_GIC_V2M] = 48, /* ...to 48 + NUM_GICV2M_SPIS - 1 */
     [VIRT_SMMU] = 74,    /* ...to 74 + NUM_SMMU_IRQS - 1 */
@@ -884,6 +888,8 @@ static void create_secure_gpio_pwr(char *fdt, DeviceState *pl061_dev,
                             "okay");
 }
 
+static uint32_t pl061_phandle;
+
 static void create_gpio_devices(const VirtMachineState *vms, int gpio,
                                 MemoryRegion *mem)
 {
@@ -902,7 +908,7 @@ static void create_gpio_devices(const VirtMachineState *vms, int gpio,
     memory_region_add_subregion(mem, base, sysbus_mmio_get_region(s, 0));
     sysbus_connect_irq(s, 0, qdev_get_gpio_in(vms->gic, irq));
 
-    uint32_t phandle = qemu_fdt_alloc_phandle(ms->fdt);
+    uint32_t pl061_phandle = qemu_fdt_alloc_phandle(ms->fdt);
     nodename = g_strdup_printf("/pl061@%" PRIx64, base);
     qemu_fdt_add_subnode(ms->fdt, nodename);
     qemu_fdt_setprop_sized_cells(ms->fdt, nodename, "reg",
@@ -915,7 +921,7 @@ static void create_gpio_devices(const VirtMachineState *vms, int gpio,
                            GIC_FDT_IRQ_FLAGS_LEVEL_HI);
     qemu_fdt_setprop_cell(ms->fdt, nodename, "clocks", vms->clock_phandle);
     qemu_fdt_setprop_string(ms->fdt, nodename, "clock-names", "apb_pclk");
-    qemu_fdt_setprop_cell(ms->fdt, nodename, "phandle", phandle);
+    qemu_fdt_setprop_cell(ms->fdt, nodename, "phandle", pl061_phandle);
 
     if (gpio != VIRT_GPIO) {
         /* Mark as not usable by the normal world */
@@ -926,9 +932,9 @@ static void create_gpio_devices(const VirtMachineState *vms, int gpio,
 
     /* Child gpio devices */
     if (gpio == VIRT_GPIO) {
-        create_gpio_keys(ms->fdt, pl061_dev, phandle);
+        create_gpio_keys(ms->fdt, pl061_dev, pl061_phandle);
     } else {
-        create_secure_gpio_pwr(ms->fdt, pl061_dev, phandle);
+        create_secure_gpio_pwr(ms->fdt, pl061_dev, pl061_phandle);
     }
 }
 
@@ -1828,6 +1834,7 @@ static void machvirt_init(MachineState *machine)
     bool has_ged = !vmc->no_ged;
     unsigned int smp_cpus = machine->smp.cpus;
     unsigned int max_cpus = machine->smp.max_cpus;
+    MachineState *ms = MACHINE(vms);
 
     /*
      * In accelerated mode, the memory map is computed earlier in kvm_type()
@@ -2071,6 +2078,52 @@ static void machvirt_init(MachineState *machine)
 
     if (vms->secure && !vmc->no_secure_gpio) {
         create_gpio_devices(vms, VIRT_SECURE_GPIO, secure_sysmem);
+    }
+
+    // Custom fdt
+    {
+        DeviceState *dev = sysbus_create_simple("pl022", vms->memmap[VIRT_SPI].base,
+                                                qdev_get_gpio_in(vms->gic, vms->irqmap[VIRT_SPI]));
+
+        // SPI node
+        {
+            const char compat[] = "arm,pl022\0arm,primecell";
+            char *nodename = g_strdup_printf("/spi@%" PRIx64, vms->memmap[VIRT_SPI].base);
+
+            qemu_fdt_add_subnode(ms->fdt, "/mclk");
+            qemu_fdt_setprop_string(ms->fdt, "/mclk", "compatible", "fixed-clock");
+            qemu_fdt_setprop_cell(ms->fdt, "/mclk", "#clock-cells", 0x0);
+            qemu_fdt_setprop_cell(ms->fdt, "/mclk", "clock-frequency", 24000);
+            qemu_fdt_setprop_string(ms->fdt, "/mclk", "clock-output-names", "bobsclk");
+
+            const char *reg_node = "/regulator@0";
+            uint32_t clk_phandle = qemu_fdt_alloc_phandle(ms->fdt);
+            uint32_t reg_phandle = qemu_fdt_alloc_phandle(ms->fdt);
+            qemu_fdt_setprop_cell(ms->fdt, "/mclk", "phandle", clk_phandle);
+            qemu_fdt_add_subnode(ms->fdt, reg_node);
+            qemu_fdt_setprop(ms->fdt, reg_node, "compatible",
+                             "regulator-fixed", sizeof("regulator-fixed"));
+            qemu_fdt_setprop_cell(ms->fdt, reg_node, "reg", 0);
+            qemu_fdt_setprop_cell(ms->fdt, reg_node,
+                                  "regulator-min-microvolt", 3000000);
+            qemu_fdt_setprop_cell(ms->fdt, reg_node,
+                                  "regulator-max-microvolt", 3000000);
+            qemu_fdt_setprop_cell(ms->fdt, reg_node, "phandle", reg_phandle);
+            qemu_fdt_setprop_string(ms->fdt, reg_node, "regulator-name", "vcc_fun");
+            qemu_fdt_add_subnode(ms->fdt, nodename);
+
+            qemu_fdt_setprop(ms->fdt, nodename, "compatible",
+                             compat, sizeof(compat));
+            qemu_fdt_setprop_sized_cells(ms->fdt, nodename, "reg",
+                                         2, vms->memmap[VIRT_SPI].base,
+                                         2, vms->memmap[VIRT_SPI].size);
+            qemu_fdt_setprop_string(ms->fdt, nodename, "clock-names", "apb_pclk");
+            qemu_fdt_setprop_cell(ms->fdt, nodename, "clocks", vms->clock_phandle);
+            qemu_fdt_setprop_cells(ms->fdt, nodename, "interrupts",
+                                   GIC_FDT_IRQ_TYPE_SPI, vms->irqmap[VIRT_SPI],
+                                   GIC_FDT_IRQ_FLAGS_LEVEL_HI);
+            qemu_fdt_setprop_cells(ms->fdt, nodename, "num-cs", 3);
+        }
     }
 
      /* connect powerdown request */
