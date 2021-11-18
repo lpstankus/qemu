@@ -2124,6 +2124,28 @@ static void machvirt_init(MachineState *machine)
                                    GIC_FDT_IRQ_FLAGS_LEVEL_HI);
             qemu_fdt_setprop_cells(ms->fdt, nodename, "num-cs", 3);
         }
+
+        // ADXL313 node
+        {
+            const char compat2[] = "adi,adxl313";
+            char *nodename2 = g_strdup_printf("/spi@%" PRIx64 "/adc@%" PRIx64,
+                                              vms->memmap[VIRT_SPI].base, 0x0l);
+
+            void *bus = qdev_get_child_bus(dev, "ssi");
+            DeviceState *spidev = ssi_create_peripheral(bus, "adxl313");
+            if (!spidev)
+                printf("could not create adxl313\n");
+
+            qemu_fdt_add_subnode(ms->fdt, nodename2);
+            qemu_fdt_setprop(ms->fdt, nodename2, "compatible", compat2, sizeof(compat2));
+
+            qemu_fdt_setprop_sized_cells(ms->fdt, nodename2, "reg", 1, 0x0);
+            qemu_fdt_setprop_sized_cells(ms->fdt, nodename2, "spi-max-frequency", 1, 1000000);
+
+            qemu_fdt_setprop_cell(ms->fdt, nodename2, "interrupt-parent", pl061_phandle);
+            qemu_fdt_setprop_cell(ms->fdt, nodename2, "interrupt-parent", pl061_phandle);
+            qemu_fdt_setprop_cells(ms->fdt, nodename2, "interrupts", 4, 3);
+        }
     }
 
      /* connect powerdown request */
